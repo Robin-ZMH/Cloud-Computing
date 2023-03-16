@@ -1,27 +1,26 @@
-from telegram.ext import (Updater, CommandHandler, MessageHandler, 
-                        Filters, CallbackContext)
+from telegram.ext import (Updater, CommandHandler, MessageHandler,
+                          Filters, CallbackContext)
 from telegram import Update
 # The messageHandler is used for all message updates
-import configparser
+import os
 import logging
 import redis
 
 global redis1
 
+
 def main():
     # Load your token and create an Updater for your Bot
-    config = configparser.ConfigParser()
-    config.read('config.ini')
-    updater = Updater(token=(config['TELEGRAM']['ACCESS_TOKEN']), use_context=True)
+    updater = Updater(token=(os.environ['ACCESS_TOKEN']), use_context=True)
     dispatcher = updater.dispatcher
-    
+
     logging.basicConfig(format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
                         level=logging.INFO)
 
     global redis1
-    redis1 = redis.Redis(host=(config['REDIS']['HOST']), 
-                        password=(config['REDIS']['PASSWORD']), 
-                        port=(config['REDIS']['REDISPORT']))
+    redis1 = redis.Redis(host=os.environ['HOST'],
+                         password=os.environ['PASSWORD'],
+                         port=os.environ['REDISPORT'])
 
     # register a dispatcher to handle message: here we register an echo dispatcher
     echo_handler = MessageHandler(Filters.text & (~Filters.command), echo)
@@ -41,7 +40,8 @@ def echo(update: Update, context: CallbackContext):
     reply_message = update.message.text.upper()
     logging.info("Update: " + str(update))
     logging.info("context: " + str(context))
-    context.bot.send_message(chat_id=update.effective_chat.id, text=reply_message)
+    context.bot.send_message(
+        chat_id=update.effective_chat.id, text=reply_message)
 
 
 # Define a few command handlers. These usually take the two arguments update and
@@ -56,7 +56,7 @@ def add(update: Update, context: CallbackContext) -> None:
     try:
         global redis1
         logging.info(f"/add:{context.args[0]}")
-        msg = context.args[0] # /add keyword <-- this should store the keyword
+        msg = context.args[0]  # /add keyword <-- this should store the keyword
         redis1.incr(msg)
         update.message.reply_text(
             f'You have said {msg} for {redis1.get(msg).decode("UTF-8")} times.')
@@ -68,7 +68,6 @@ def add(update: Update, context: CallbackContext) -> None:
 def hello(update: Update, context: CallbackContext) -> None:
     message = update.message.text.removeprefix("/hello").strip()
     update.message.reply_text(f'Good day, {message}!')
-
 
 
 if __name__ == "__main__":
