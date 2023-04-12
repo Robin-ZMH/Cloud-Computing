@@ -1,5 +1,9 @@
-# The link of the chatbot:
+# This is a telegram chatbot that integrates with OpenAI api
+
+## The link of the chatbot:
 - http://t.me/cannot_find_bot
+## Enter /help command to check the help messages
+#
 # How to run the service locally?
 ## Prerequisites:
 ### 1. Docker on your computer or VM
