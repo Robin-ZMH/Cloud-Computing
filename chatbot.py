@@ -1,7 +1,8 @@
+import asyncio
 from telegram.ext import (Application, CommandHandler, MessageHandler,
                           filters, ContextTypes, ConversationHandler)
 from telegram import Update
-from telegram.error import TimedOut
+from telegram.error import TimedOut, BadRequest
 import openai
 import mysql.connector
 import os
@@ -12,6 +13,7 @@ import redis
 import json
 import requests
 from wrapt_timeout_decorator import *
+from types import GeneratorType
 
 db_config = {
     'host': os.environ['DB_HOST'],
@@ -113,50 +115,82 @@ async def end(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     await update.message.reply_text("Good bye~~")
 
 
-@timeout(90)
-def make_request(messages) -> str:
-    response = openai.ChatCompletion.create(
+@timeout(10)
+def make_request(messages) -> GeneratorType:
+    response_gen = openai.ChatCompletion.create(
         model="gpt-3.5-turbo",
-        messages=messages
+        messages=messages,
+        stream=True,
+        temperature=0.7
     )
-    result = response.choices[0].message.content
-    return result
+    return response_gen
 
 
-async def chat_completion(msg, id) -> str:
+def message_generator(msg, id) -> GeneratorType:
     data = redis1.get(id)
+    result = ""
     if data is None:
         logging.info(f"User id={id}, Not using context:\n{msg}")
         messages = [{"role": "user", "content": msg}]
-        result = make_request(messages)
-        return result
+        response_gen = make_request(messages)
+        
+        for chunk in response_gen:
+            delta = chunk.choices[0].delta
+            if "content" in delta:
+                result += delta.get("content")
+                yield 0, result
+        yield 1, result
+    else:
+        context = json.loads(data)
+        assert isinstance(context, list)
 
-    context = json.loads(data)
-    assert isinstance(context, list)
+        context.append({"role": "user", "content": msg})
+        logging.info(f'User id={id}, Using context, context:\n{context}')
 
-    context.append({"role": "user", "content": msg})
-    logging.info(f'User id={id}, Using context, context:\n{context}')
+        response_gen = make_request(context)
+    
+        for chunk in response_gen:
+            delta = chunk.choices[0].delta
+            if "content" in delta:
+                result += delta.get("content")
+                yield 0, result
 
-    result = make_request(context)
+        context.append({"role": "assistant", "content": result})
 
-    context.append({"role": "assistant", "content": result})
+        redis1.set(id, json.dumps(context))
 
-    redis1.set(id, json.dumps(context))
-
-    result += '\n\n\nYou are chat me with a context, please remember to use /end command to stop the conversation.'
-
-    return result
+        result += '\n\n\nYou are chat me with a context, please remember to use /end command to stop the conversation.'
+            
+        yield 1, result
 
 
 async def gpt_reply(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    start = time.time()
     try:
+        placeholder_message = await update.message.reply_text("...")
+        await update.message.chat.send_action(action="typing")
+        
         id = update.message.from_user.id
         msg = update.message.text
-
-        start = time.time()
-        result = await chat_completion(msg, id)
+        msg_gen = message_generator(msg, id)
+        pre_len = 0
+        for finish, msg in msg_gen:
+            if not finish and len(msg) - pre_len < 25:
+                continue
+            try:
+                await placeholder_message.edit_text(msg)
+            except BadRequest as e:
+                if str(e).startswith("Message is not modified"):
+                    logging.info("unmodified message")
+                    continue
+                else:
+                    logging.info("re-send message")
+                    await placeholder_message.edit_text(msg)
+            
+            await asyncio.sleep(0.01)
+            pre_len = len(msg)
+        
         logging.info(f"Request cost {time.time() - start}seconds")
-        await update.message.reply_text(result)
 
     except (openai.error.Timeout, TimedOut, TimeoutError) as e:
         logging.info(str(e))
