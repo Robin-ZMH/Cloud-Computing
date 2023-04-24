@@ -1,9 +1,9 @@
-import asyncio
 from telegram.ext import (Application, CommandHandler, MessageHandler,
                           filters, ContextTypes, ConversationHandler)
 from telegram import Update
 from telegram.error import TimedOut, BadRequest
 import openai
+import asyncio
 import mysql.connector
 import os
 import logging
@@ -133,7 +133,7 @@ def message_generator(msg, id) -> GeneratorType:
         logging.info(f"User id={id}, Not using context:\n{msg}")
         messages = [{"role": "user", "content": msg}]
         response_gen = make_request(messages)
-        
+
         for chunk in response_gen:
             delta = chunk.choices[0].delta
             if "content" in delta:
@@ -148,7 +148,7 @@ def message_generator(msg, id) -> GeneratorType:
         logging.info(f'User id={id}, Using context, context:\n{context}')
 
         response_gen = make_request(context)
-    
+
         for chunk in response_gen:
             delta = chunk.choices[0].delta
             if "content" in delta:
@@ -160,7 +160,7 @@ def message_generator(msg, id) -> GeneratorType:
         redis1.set(id, json.dumps(context))
 
         result += '\n\n\nYou are chat me with a context, please remember to use /end command to stop the conversation.'
-            
+
         yield 1, result
 
 
@@ -169,13 +169,13 @@ async def gpt_reply(update: Update, context: ContextTypes.DEFAULT_TYPE):
     try:
         placeholder_message = await update.message.reply_text("...")
         await update.message.chat.send_action(action="typing")
-        
+
         id = update.message.from_user.id
         msg = update.message.text
         msg_gen = message_generator(msg, id)
         pre_len = 0
         for finish, msg in msg_gen:
-            if not finish and len(msg) - pre_len < 25:
+            if not finish and len(msg) - pre_len < 40:
                 continue
             try:
                 await placeholder_message.edit_text(msg)
@@ -186,10 +186,11 @@ async def gpt_reply(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 else:
                     logging.info("re-send message")
                     await placeholder_message.edit_text(msg)
-            
-            await asyncio.sleep(0.01)
+
+            # sleep 0.03s to avoid flood error of telegram
+            await asyncio.sleep(0.03)
             pre_len = len(msg)
-        
+
         logging.info(f"Request cost {time.time() - start}seconds")
 
     except (openai.error.Timeout, TimedOut, TimeoutError) as e:
