@@ -1,6 +1,6 @@
 from telegram.ext import (Application, CommandHandler, MessageHandler,
                           filters, ContextTypes, ConversationHandler)
-from telegram import Update
+from telegram import Update, constants
 from telegram.error import TimedOut, BadRequest
 import openai
 import asyncio
@@ -14,6 +14,7 @@ import json
 import requests
 from wrapt_timeout_decorator import *
 from types import GeneratorType
+from datetime import date, timedelta
 
 db_config = {
     'host': os.environ['DB_HOST'],
@@ -86,6 +87,7 @@ async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
 
     help_message = "Hello, I'm a smart chatbot powered by ChatGPT.\n" +\
         "I have prepared some interesting commands for you:\n\n" +\
+        "/usage: Check the total usage of your account.\n\n" +\
         "/start: Start a new conversation with a context\n\n" +\
         "/end: Finish current conversation\n\n" +\
         "/image: Enter a prompt, I can generate a realistic image for you, the image will be saved in the database\n" +\
@@ -178,14 +180,15 @@ async def gpt_reply(update: Update, context: ContextTypes.DEFAULT_TYPE):
             if not finish and len(msg) - pre_len < 40:
                 continue
             try:
-                await placeholder_message.edit_text(msg)
+                parse_mode = (constants.ParseMode.MARKDOWN, None)['```' not in msg or not finish]
+                await placeholder_message.edit_text(msg, parse_mode=parse_mode)
             except BadRequest as e:
                 if str(e).startswith("Message is not modified"):
                     logging.info("unmodified message")
                     continue
                 else:
-                    logging.info("re-send message")
-                    await placeholder_message.edit_text(msg)
+                    logging.info(f"{e}\nre-send message")
+                    await placeholder_message.edit_text(msg, parse_mode=parse_mode)
 
             # sleep 0.03s to avoid flood error of telegram
             await asyncio.sleep(0.03)
@@ -332,6 +335,34 @@ async def image_del(update: Update, context: ContextTypes.DEFAULT_TYPE):
             'Failed to delete an item, please try again!')
 
 
+async def usage(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    try:
+        today = date.today() + timedelta(days=1)
+        headers = {
+            "Content-Type": "application/json",
+            "Authorization": f"Bearer {os.environ['OPENAI_API_KEY']}",
+            "user-agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/16.4 Safari/605.1.15"
+        }
+        url = f'https://api.openai.com/v1/dashboard/billing/usage?start_date=2023-04-01&&end_date={today}'
+        r = requests.get(url=url, headers=headers)
+        data = json.loads(r.content)
+        logging.info(data)
+        usage = data['total_usage']
+        text = f"Your account usage: ${usage/100:.3f} / $5.00"
+        text += "\nPricing of GPT-3.5-turbo: $0.01 / 5000 tokens"
+        await update.message.reply_text(text)
+    except Exception as e:
+        module = e.__class__.__module__
+        if module is None or module == str.__class__.__module__:
+            text = e.__class__.__name__
+        text = module + '.' + e.__class__.__name__
+        logging.info(str(text) + str(e))
+        await update.message.reply_text(
+            f"Something wrong with chatbot, please retry!")
+    finally:
+        r.close()
+
+
 def main():
     application = Application.builder().token(
         os.environ["ACCESS_TOKEN"]).concurrent_updates(True).build()
@@ -353,6 +384,8 @@ def main():
         "image_review", image_review, block=False))
     application.add_handler(CommandHandler(
         "image_del", image_del, block=False))
+    application.add_handler(CommandHandler(
+        "usage", usage, block=False))
 
     # To start the bot:
     application.run_polling()
