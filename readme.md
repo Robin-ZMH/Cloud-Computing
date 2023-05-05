@@ -1,9 +1,4 @@
 # This is a telegram chatbot that integrates with OpenAI api
-
-## The link of the chatbot:
-- http://t.me/cannot_find_bot
-## Enter /help command to check the help messages
-#
 # How to run the service locally?
 ## Prerequisites:
 ### 1. Docker on your computer or VM
@@ -11,7 +6,7 @@
 ### 2. A telegram chatbot token
 ### 3. An OpenAI API key
 
-## How to RUN?
+# How to RUN?
 ### 1. Edit docker-compose.yaml
 - Replace ACCESS_TOKEN with your own telegram token
 - Replace OPENAI_API_KEY with your own OpenAI API key
@@ -19,13 +14,4 @@
 ```bash
 docker-compose up -d
 ```
-
-## How to check logs?
-```bash
-docker logs -f chatbot
-```
-
-## How to shut down the service?
-```bash
-docker-compose down
-```
+## Enter /help command to check the help messages list
